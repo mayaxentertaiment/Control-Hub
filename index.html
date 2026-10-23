@@ -384,6 +384,9 @@ tr.u-suspended td:last-child,tr.u-suspended td.u-keep{opacity:1;}
     <div class="nav-item" data-page="team-manager">
       <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M1 9a4 4 0 018 0H1zm11-4a3 3 0 110 6 3 3 0 010-6z"/></svg>Manajemen Tim
     </div>
+    <div class="nav-item" data-page="vote-manager">
+      <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M2 2h12v9H9l-3 3v-3H2V2zm2 2v1h8V4H4zm0 3v1h5V7H4z"/></svg>Vote
+    </div>
     <div class="nav-section-label">Aset</div>
     <div class="nav-item" data-page="media-manager">
       <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M2 2h12v12H2V2zm1 1v7.5l3-3 2.5 2.5L11 7l3 4.5V3H3zm0 9.5V13h10l-3-4.5-2.5 3-2.5-2.5L3 12.5z"/></svg>Media &amp; Gambar
@@ -698,6 +701,24 @@ tr.u-suspended td:last-child,tr.u-suspended td.u-keep{opacity:1;}
     </div>
 
     <!-- SETTINGS -->
+    <div class="page" id="page-vote-manager">
+      <div class="panel" style="margin-bottom:22px"><div class="panel-header"><span class="panel-title">Tugas (1 tugas = 1 token)</span></div>
+        <div class="panel-body">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+            <input class="form-input" id="vt-tn" placeholder="Nama tugas, misal: Follow IG @mjc48" style="flex:2;min-width:200px">
+            <input class="form-input" id="vt-tl" placeholder="Link (https://...)" style="flex:2;min-width:200px">
+            <button class="btn btn-primary btn-sm" onclick="vtAdd('vote_tasks',{name:vtv('vt-tn'),link:vtv('vt-tl')})">+ Tambah</button></div>
+          <div id="vt-tl-list"></div></div></div>
+      <div class="panel" style="margin-bottom:22px"><div class="panel-header"><span class="panel-title">Pilihan Vote</span></div>
+        <div class="panel-body">
+          <div style="display:flex;gap:10px;margin-bottom:14px"><input class="form-input" id="vt-cn" placeholder="Nama pilihan / kandidat" style="flex:1">
+            <button class="btn btn-primary btn-sm" onclick="vtAdd('vote_candidates',{name:vtv('vt-cn')})">+ Tambah</button></div>
+          <div id="vt-cl-list"></div></div></div>
+      <div class="panel" style="margin-bottom:22px"><div class="panel-header"><span class="panel-title">Klaim Menunggu Persetujuan</span></div><div class="panel-body"><div id="vt-pend"></div></div></div>
+      <div class="panel"><div class="panel-header"><span class="panel-title">Hasil &amp; Token</span><button class="btn btn-ghost btn-sm" onclick="renderVote()">Muat ulang</button></div>
+        <div class="panel-body"><div id="vt-res"></div></div></div>
+    </div>
+
     <div class="page" id="page-settings">
       <div class="rs-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:22px;">
         <div>
@@ -1299,6 +1320,7 @@ const pageInfo = {
   'settings':{ title:'Pengaturan', crumb:'MJC48 Admin / Settings' },
   'agenda':{ title:'Agenda & Kalender', crumb:'MJC48 Admin / Agenda' },
   'accounts':{ title:'Akun', crumb:'MJC48 Admin / Akun' },
+  'vote-manager':{ title:'Vote', crumb:'MJC48 Admin / Vote' },
   'preview':{ title:'Preview Web Publik', crumb:'MJC48 Admin / Preview' },
 };
 
@@ -1318,6 +1340,7 @@ function goPage(pid){ if(pid==='profile') setTimeout(renderProfile,0);
   if(pid==='schedule-manager') renderSchedule();
   if(pid==='dashboard') updateDashStats();
   if(pid==='accounts') renderUsers();
+  if(pid==='vote-manager') renderVote();
   }
 
 document.querySelectorAll('.nav-item[data-page]').forEach(el=>{
@@ -1715,5 +1738,43 @@ setInterval(async()=>{
   try{ await api('ping'); }catch(e){}
 },10*60000);
 </script>
-<div style="position:fixed;right:10px;bottom:6px;font-size:10px;opacity:.45;z-index:9999;pointer-events:none">v2026.10.21-8</div></body>
+<div style="position:fixed;right:10px;bottom:6px;font-size:10px;opacity:.45;z-index:9999;pointer-events:none">v2026.10.21-8</div><script>
+const vtv=i=>document.getElementById(i).value.trim();
+async function vtAdd(t,row){
+  if(!row.name) return showToast('Isi nama dulu','error');
+  const r=await sb.from(t).insert(row); if(r.error) return showToast(r.error.message,'error');
+  ['vt-tn','vt-tl','vt-cn'].forEach(i=>document.getElementById(i).value=''); renderVote();
+}
+async function vtDel(t,id,msg){
+  if(!confirm(msg)) return;
+  const r=await sb.from(t).delete().eq('id',id); if(r.error) return showToast(r.error.message,'error');
+  showToast('Dihapus','success'); renderVote();
+}
+async function vtTok(code,a){
+  let q=a==='no'?sb.from('vote_tokens').delete().eq('code',code):sb.from('vote_tokens').update({status:'approved'});
+  q=a==='all'?q.eq('status','pending'):a==='ok'?q.eq('code',code):q;
+  const r=await q; if(r.error) return showToast(r.error.message,'error'); renderVote();
+}
+async function vtAct(id,on){ const r=await sb.from('vote_tasks').update({active:on}).eq('id',id); if(r.error) showToast(r.error.message,'error'); renderVote(); }
+async function renderVote(){
+  const [t,c,k,v]=await Promise.all([sb.from('vote_tasks').select('*').order('id'),sb.from('vote_candidates').select('*').order('id'),sb.from('vote_tokens').select('code,voter,task_id,used,status'),sb.from('vote_votes').select('candidate_id')]);
+  if(t.error) return showToast('Tabel vote belum dibuat: '+t.error.message,'error');
+  const all=k.data||[], tk=all.filter(y=>y.status==='approved'), vs=v.data||[], pend=all.filter(y=>y.status!=='approved');
+  const tn=id=>((t.data||[]).find(z=>z.id===id)||{}).name||'';
+  const row=(a,b)=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line);flex-wrap:wrap">${a}<span>${b}</span></div>`;
+  document.getElementById('vt-tl-list').innerHTML=(t.data||[]).map(x=>{
+    const n=tk.filter(y=>y.task_id===x.id).length;
+    return row(`<span><b>${esc(x.name)}</b> <small style="color:var(--ink-soft)">${esc(x.link||'')} · ${n} token</small></span>`,
+      `<button class="btn btn-ghost btn-sm" onclick="vtAct(${x.id},${!x.active})">${x.active?'Aktif':'Nonaktif'}</button> <button class="btn btn-ghost btn-sm" onclick="vtDel('vote_tasks',${x.id},'Hapus tugas ini? ${n} token miliknya ikut terhapus (suara yang sudah masuk tetap dihitung).')">Hapus</button>`);
+  }).join('')||'<p style="color:var(--ink-soft)">Belum ada tugas.</p>';
+  document.getElementById('vt-cl-list').innerHTML=(c.data||[]).map(x=>row(`<b>${esc(x.name)}</b>`,
+    `<button class="btn btn-ghost btn-sm" onclick="vtDel('vote_candidates',${x.id},'Hapus pilihan ini beserta suaranya?')">Hapus</button>`)).join('')||'<p style="color:var(--ink-soft)">Belum ada pilihan.</p>';
+  document.getElementById('vt-pend').innerHTML=pend.length?(pend.length>1?`<button class="btn btn-primary btn-sm" style="margin-bottom:8px" onclick="vtTok(null,'all')">Setujui semua (${pend.length})</button>`:'')+pend.map(x=>row(`<span><b>${esc(x.voter)}</b> <small style="color:var(--ink-soft)">· ${esc(tn(x.task_id))}</small></span>`,
+    `<button class="btn btn-primary btn-sm" onclick="vtTok('${x.code}','ok')">Setujui</button> <button class="btn btn-ghost btn-sm" onclick="vtTok('${x.code}','no')">Tolak</button>`)).join(''):'<p style="color:var(--ink-soft)">Tidak ada klaim yang menunggu.</p>';
+  const used=tk.filter(y=>y.used).length;
+  document.getElementById('vt-res').innerHTML=`<p style="margin-bottom:8px">Menunggu persetujuan: <b>${pend.length}</b> · token disetujui: <b>${tk.length}</b> · terpakai: <b>${used}</b> · suara masuk: <b>${vs.length}</b></p>`
+    +(c.data||[]).map(x=>{const n=vs.filter(y=>y.candidate_id===x.id).length;return row(esc(x.name),`<b>${n}</b> suara`);}).join('');
+}
+</script>
+</body>
 </html>
